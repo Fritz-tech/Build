@@ -1,29 +1,38 @@
-import { notFound } from "next/navigation";
-import { db } from "@/db";
-import { project, user } from "@/db/schema";
-import { eq } from "drizzle-orm";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { WorkspaceClient } from "./workspace-client";
+import type { Project } from "@/db/schema";
 
-interface PageProps {
-  params: Promise<{ projectId: string }>;
-}
+interface Owner { name: string; email: string; image: string | null }
 
-export default async function WorkspacePage({ params }: PageProps) {
-  const { projectId } = await params;
+export default function WorkspacePage() {
+  const params = useParams<{ projectId: string }>();
+  const [data, setData] = useState<{ project: Project; owner: Owner } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const rows = await db
-    .select({
-      project: project,
-      user: { name: user.name, email: user.email, image: user.image },
-    })
-    .from(project)
-    .innerJoin(user, eq(project.userId, user.id))
-    .where(eq(project.id, projectId))
-    .limit(1);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const token = localStorage.getItem("bearer_token") || "";
+      if (!token) { setError("Please sign in to view this project."); return; }
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(params.projectId)}`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Unable to load project");
+        if (!cancelled) setData(body);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Unable to load project");
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [params.projectId]);
 
-  if (!rows.length) notFound();
-
-  const { project: proj, user: owner } = rows[0];
-
-  return <WorkspaceClient project={proj} owner={owner} />;
+  if (error) return <main className="min-h-screen grid place-items-center p-6"><div className="text-center"><p className="text-sm text-red-600">{error}</p><a className="mt-4 inline-block text-violet-600 underline" href="/">Return home</a></div></main>;
+  if (!data) return <main className="min-h-screen grid place-items-center text-sm text-gray-500">Loading your project…</main>;
+  return <WorkspaceClient project={data.project} owner={data.owner} />;
 }
