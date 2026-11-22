@@ -22,6 +22,7 @@ type AuthResponse = {
   token?: string;
   user?: AuthUser;
   data?: { token?: string; user?: AuthUser };
+  session?: { user?: AuthUser };
   message?: string;
   [key: string]: unknown;
 };
@@ -64,12 +65,10 @@ async function authRequest(
     }
 
     const data = (payload.data ?? payload) as AuthResponse;
-    const returnedToken = data.token;
-    if (returnedToken && typeof window !== "undefined") {
-      localStorage.setItem("bearer_token", returnedToken);
+    if (data.token && typeof window !== "undefined") {
+      localStorage.setItem("bearer_token", data.token);
       notifyAuthChanged();
     }
-
     return { data, error: null };
   } catch (error) {
     return {
@@ -82,29 +81,32 @@ async function authRequest(
   }
 }
 
-async function signInEmail(credentials: {
-  email: string;
-  password: string;
-}) {
-  return authRequest("sign-in/email", credentials);
-}
+export const signIn = {
+  email: (credentials: { email: string; password: string }) =>
+    authRequest("sign-in/email", credentials),
+};
 
-async function signUpEmail(credentials: {
-  name: string;
-  email: string;
-  password: string;
-}) {
-  return authRequest("sign-up/email", credentials);
-}
-
-export const signIn = { email: signInEmail };
-export const signUp = { email: signUpEmail };
+export const signUp = {
+  email: (credentials: { name: string; email: string; password: string }) =>
+    authRequest("sign-up/email", credentials),
+};
 
 export async function signOut() {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("bearer_token") || "" : "";
   if (token) {
-    await authRequest("sign-out", undefined, token);
+    try {
+      await fetch(`${AUTH_URL.replace(/\/+$/, "")}/sign-out`, {
+        method: "POST",
+        headers: {
+          "x-api-key": AUTH_KEY,
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+    } catch (error) {
+      console.error("CloudHike sign-out request failed:", error);
+    }
   }
   if (typeof window !== "undefined") {
     localStorage.removeItem("bearer_token");
@@ -133,14 +135,8 @@ export function useSession() {
       return;
     }
 
-    const payload = result.data as AuthResponse & {
-      session?: { user?: AuthUser };
-    };
-    const sessionUser =
-      payload.user ??
-      payload.session?.user ??
-      payload.data?.user ??
-      null;
+    const payload = result.data;
+    const sessionUser = payload.user ?? payload.session?.user ?? null;
     setUser(sessionUser);
     setIsPending(false);
   }, []);
