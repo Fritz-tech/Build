@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { signIn, signUp } from "@/lib/auth-client";
+import { authClient, signIn, signUp } from "@/lib/auth-client";
 import {
   Sparkles,
   Eye,
@@ -173,26 +173,23 @@ export function AuthDialog({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSocialSignIn = (provider: "google" | "github") => {
+  const handleSocialSignIn = async (provider: "google" | "github") => {
     setIsLoading(true);
     setSocialLoading(provider);
     setErrors({});
-
     try {
-      // Save any pending prompt to storage before navigating away
       onBeforeSocialRedirect?.();
-
-      const AUTH_URL =
-        process.env.NEXT_PUBLIC_AUTH_URL ||
-        "https://cloudhike.dev/api/auth-service/fritz-build-e9j75q";
-      const returnTo = new URL("/auth/callback", window.location.origin);
-
-      window.location.assign(
-        `${AUTH_URL}/social/${provider}?to=${encodeURIComponent(returnTo.href)}`
-      );
+      const result = await authClient.signIn.social({
+        provider,
+        callbackURL: window.location.origin,
+      });
+      if (result.error) {
+        setErrors({ general: result.error.message || `Failed to connect with ${provider}.` });
+        setIsLoading(false);
+        setSocialLoading(null);
+      }
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : `Failed to connect with ${provider}.`;
+      const msg = err instanceof Error ? err.message : `Failed to connect with ${provider}.`;
       setErrors({ general: msg });
       setIsLoading(false);
       setSocialLoading(null);
@@ -223,16 +220,6 @@ export function AuthDialog({
           return;
         }
 
-        // Store bearer token if returned in response data
-        if (result.data) {
-          const token =
-            (result.data as Record<string, unknown>).token ||
-            ((result.data as Record<string, unknown>).session as Record<string, unknown>)?.token;
-          if (token && typeof window !== "undefined") {
-            localStorage.setItem("bearer_token", String(token));
-          }
-        }
-
         // Sign up succeeded – show success briefly then close
         setSuccess(true);
         setTimeout(() => {
@@ -252,16 +239,6 @@ export function AuthDialog({
           });
           setIsLoading(false);
           return;
-        }
-
-        // Store bearer token if returned in response data
-        if (result.data) {
-          const token =
-            (result.data as Record<string, unknown>).token ||
-            ((result.data as Record<string, unknown>).session as Record<string, unknown>)?.token;
-          if (token && typeof window !== "undefined") {
-            localStorage.setItem("bearer_token", String(token));
-          }
         }
 
         setSuccess(true);
