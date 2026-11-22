@@ -15,11 +15,10 @@ export default function WorkspacePage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const token = localStorage.getItem("bearer_token") || "";
-      if (!token) { setError("Please sign in to view this project."); return; }
       try {
         const response = await fetch(`/api/projects/${encodeURIComponent(params.projectId)}`, {
-          headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+          cache: "no-store",
+          credentials: "same-origin",
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || "Unable to load project");
