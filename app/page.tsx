@@ -68,9 +68,6 @@ export default function Home() {
 
   // ─── Sign out handler ──────────────────────────────────────────────────
   const handleSignOut = useCallback(async () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("bearer_token");
-    }
     try {
       await signOut();
     } catch (e) {
@@ -91,16 +88,11 @@ export default function Home() {
           formData.append("assets", f.file);
         }
 
-        // Send the CloudHike Bearer token so the API route can verify the session
-        const token =
-          typeof window !== "undefined"
-            ? localStorage.getItem("bearer_token") || ""
-            : "";
-
+        // Better Auth uses a secure session cookie automatically.
         const res = await fetch("/api/projects", {
           method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
+          credentials: "same-origin",
         });
 
         if (!res.ok) {
@@ -327,7 +319,7 @@ export default function Home() {
           {/* Subtitle */}
           <p className="mx-auto mt-4 max-w-xl text-sm text-gray-500 sm:text-base leading-relaxed">
             {isSignedIn
-              ? "Your CloudHike backend and credits are active. Enter your prompt or attach design mockups below to get started."
+              ? "Your account is ready. Enter your prompt or attach design mockups below to get started."
               : "Transform your ideas into fully functional mobile apps in minutes. Just describe what you want, and our AI does the rest."}
           </p>
 
