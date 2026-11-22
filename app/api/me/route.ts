@@ -1,31 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateAppUser, verifyCloudHikeToken } from "@/lib/cloudhike-auth";
+import { auth } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
-    const authorization = req.headers.get("authorization") || "";
-    const token = authorization.startsWith("Bearer ")
-      ? authorization.slice(7).trim()
-      : "";
-
-    if (!token) {
+    const session = await auth.api.getSession({ headers: req.headers });
+    if (!session) {
       return NextResponse.json({ user: null }, { status: 401 });
     }
-
-    const authUser = await verifyCloudHikeToken(token);
-    if (!authUser) {
-      return NextResponse.json({ user: null }, { status: 401 });
-    }
-
-    const appUser = await getOrCreateAppUser(authUser);
 
     return NextResponse.json({
       user: {
-        id: appUser.id,
-        name: appUser.name,
-        email: appUser.email,
-        image: appUser.image,
-        credits: appUser.credits,
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        image: session.user.image,
+        credits: session.user.credits,
       },
     });
   } catch (error) {
