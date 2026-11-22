@@ -128,17 +128,31 @@ export function useSession() {
     }
 
     setIsPending(true);
-    const result = await authRequest("get-session", undefined, token);
-    if (result.error || !result.data) {
-      setUser(null);
-      setIsPending(false);
-      return;
-    }
+    try {
+      // The server verifies the CloudHike token and returns the app's own
+      // profile, including the real credits balance from the project database.
+      const response = await fetch("/api/me", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
 
-    const payload = result.data;
-    const sessionUser = payload.user ?? payload.session?.user ?? null;
-    setUser(sessionUser);
-    setIsPending(false);
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("bearer_token");
+        }
+        setUser(null);
+        setIsPending(false);
+        return;
+      }
+
+      const payload = (await response.json()) as { user?: AuthUser | null };
+      setUser(payload.user ?? null);
+    } catch (error) {
+      console.error("Unable to refresh the signed-in user:", error);
+      setUser(null);
+    } finally {
+      setIsPending(false);
+    }
   }, []);
 
   useEffect(() => {
