@@ -39,7 +39,7 @@ export default function AuthCallbackPage() {
 
       if (token) {
         // Store bearer token for CloudHike Auth client
-        localStorage.setItem("bearer_token", decodeURIComponent(token));
+        localStorage.setItem("bearer_token", token);
         // Clean URL history
         window.history.replaceState(null, "", "/");
         // Redirect home where session will auto-hydrate
