@@ -3,21 +3,18 @@ import { db } from "@/db";
 import { project } from "@/db/schema";
 import { uploadAsset, type UploadedAsset } from "@/lib/storage";
 import { and, desc, eq } from "drizzle-orm";
-import { getOrCreateAppUser, verifyCloudHikeToken } from "@/lib/cloudhike-auth";
+import { auth } from "@/lib/auth";
 
 async function authenticate(req: NextRequest) {
-  const header = req.headers.get("authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!token) return null;
-  const authUser = await verifyCloudHikeToken(token);
-  return authUser ? getOrCreateAppUser(authUser) : null;
+  const session = await auth.api.getSession({ headers: req.headers });
+  return session?.user ?? null;
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const appUser = await authenticate(req);
-    if (!appUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const projects = await db.select().from(project).where(eq(project.userId, appUser.id)).orderBy(desc(project.createdAt));
+    const authUser = await authenticate(req);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const projects = await db.select().from(project).where(eq(project.userId, authUser.id)).orderBy(desc(project.createdAt));
     return NextResponse.json({ projects });
   } catch (error) {
     console.error("Project list failed:", error);
@@ -27,15 +24,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const appUser = await authenticate(req);
-    if (!appUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authUser = await authenticate(req);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     let formData: FormData;
     try { formData = await req.formData(); } catch { return NextResponse.json({ error: "Invalid form data" }, { status: 400 }); }
     const prompt = (formData.get("prompt") as string | null)?.trim();
     if (!prompt) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     const files = formData.getAll("assets").filter((entry): entry is File => entry instanceof File);
     const [newProject] = await db.insert(project).values({
-      userId: appUser.id, prompt, status: "queued", assets: "[]",
+      userId: authUser.id, prompt, status: "queued", assets: "[]",
     }).returning();
     const uploaded: UploadedAsset[] = [];
     for (const file of files) {
@@ -49,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
     if (uploaded.length) {
       await db.update(project).set({ assets: JSON.stringify(uploaded) })
-        .where(and(eq(project.id, newProject.id), eq(project.userId, appUser.id)));
+        .where(and(eq(project.id, newProject.id), eq(project.userId, authUser.id)));
       newProject.assets = JSON.stringify(uploaded);
     }
     return NextResponse.json({ project: newProject }, { status: 201 });
