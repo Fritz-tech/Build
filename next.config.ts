@@ -1,14 +1,5 @@
-   import type { NextConfig } from "next";
+import type { NextConfig } from "next";
 
-   const nextConfig: NextConfig = {
-     async rewrites() {
-       return [
-         {
-           source: "/api/auth-service/:path*",
-           destination: "https://cloudhike.dev/api/auth-service/:path*",
-         },
-       ];
-     },
-   };
+const nextConfig: NextConfig = {};
 
-   export default nextConfig;
+export default nextConfig;

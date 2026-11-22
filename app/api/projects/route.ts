@@ -1,86 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { project, session, user } from "@/db/schema";
+import { project } from "@/db/schema";
 import { uploadAsset, type UploadedAsset } from "@/lib/storage";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+
+async function authenticate(req: NextRequest) {
+  const session = await auth.api.getSession({ headers: req.headers });
+  return session?.user ?? null;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const authUser = await authenticate(req);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const projects = await db.select().from(project).where(eq(project.userId, authUser.id)).orderBy(desc(project.createdAt));
+    return NextResponse.json({ projects });
+  } catch (error) {
+    console.error("Project list failed:", error);
+    return NextResponse.json({ error: "Unable to load projects" }, { status: 500 });
+  }
+}
 
 export async function POST(req: NextRequest) {
-  // ── 1. Authenticate: look up Bearer token directly in the shared Postgres DB
-  const authHeader = req.headers.get("authorization");
-  const token = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice(7).trim()
-    : null;
-
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const [row] = await db
-    .select({ session: session, user: user })
-    .from(session)
-    .innerJoin(user, eq(session.userId, user.id))
-    .where(eq(session.token, token))
-    .limit(1);
-
-  if (!row || new Date(row.session.expiresAt) < new Date()) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const userId = row.user.id;
-
-  // ── 2. Parse multipart form data ─────────────────────────────────────
-  let formData: FormData;
   try {
-    formData = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
-  }
-
-  const prompt = (formData.get("prompt") as string | null)?.trim();
-  if (!prompt) {
-    return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
-  }
-
-  const rawFiles = formData.getAll("assets") as File[];
-
-  // ── 3. Create project record (get the ID for the S3 path) ─────────────
-  const [newProject] = await db
-    .insert(project)
-    .values({
-      userId,
-      prompt,
-      status: "queued",
-      assets: "[]",
-    })
-    .returning();
-
-  // ── 4. Upload assets to CloudHike S3 storage ─────────────────────────
-  const uploadedAssets: UploadedAsset[] = [];
-  for (const file of rawFiles) {
-    if (file.size === 0) continue;
-    try {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const asset = await uploadAsset(
-        buffer,
-        file.name,
-        file.type || "application/octet-stream",
-        newProject.id
-      );
-      uploadedAssets.push(asset);
-    } catch (err) {
-      console.error("Failed to upload asset:", file.name, err);
-      // Non-fatal — continue with remaining files
+    const authUser = await authenticate(req);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    let formData: FormData;
+    try { formData = await req.formData(); } catch { return NextResponse.json({ error: "Invalid form data" }, { status: 400 }); }
+    const prompt = (formData.get("prompt") as string | null)?.trim();
+    if (!prompt) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+    const files = formData.getAll("assets").filter((entry): entry is File => entry instanceof File);
+    const [newProject] = await db.insert(project).values({
+      userId: authUser.id, prompt, status: "queued", assets: "[]",
+    }).returning();
+    const uploaded: UploadedAsset[] = [];
+    for (const file of files) {
+      if (!file.size) continue;
+      try {
+        uploaded.push(await uploadAsset(Buffer.from(await file.arrayBuffer()), file.name, file.type || "application/octet-stream", newProject.id));
+      } catch (error) {
+        console.error("Failed to upload project asset:", file.name, error);
+        return NextResponse.json({ error: `Project was created, but uploading "${file.name}" failed. Check storage configuration.`, projectId: newProject.id }, { status: 502 });
+      }
     }
+    if (uploaded.length) {
+      await db.update(project).set({ assets: JSON.stringify(uploaded) })
+        .where(and(eq(project.id, newProject.id), eq(project.userId, authUser.id)));
+      newProject.assets = JSON.stringify(uploaded);
+    }
+    return NextResponse.json({ project: newProject }, { status: 201 });
+  } catch (error) {
+    console.error("Project creation failed:", error);
+    return NextResponse.json({ error: "Unable to create project" }, { status: 500 });
   }
-
-  // ── 5. Update project record with asset metadata ───────────────────────
-  if (uploadedAssets.length > 0) {
-    await db
-      .update(project)
-      .set({ assets: JSON.stringify(uploadedAssets) })
-      .where(eq(project.id, newProject.id));
-    newProject.assets = JSON.stringify(uploadedAssets);
-  }
-
-  return NextResponse.json({ project: newProject }, { status: 201 });
 }
