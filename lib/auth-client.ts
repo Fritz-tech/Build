@@ -172,3 +172,7 @@ export function useSession() {
     refetch: refreshSession,
   };
 }
+
+// Backward-compatible placeholder for older UI components that still import
+// authClient. Profile editing will be wired to a server endpoint separately.
+export const authClient: Record<string, never> = {};
